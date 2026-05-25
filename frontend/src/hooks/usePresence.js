@@ -9,11 +9,28 @@ export function usePresence(userIds = []) {
   const { onlineUsers, subscribe } = useSocket();
   const [presenceMap, setPresenceMap] = useState({});
 
-  // Create a stable primitive key based on array content to prevent unnecessary effect triggers
-  const serializedUserIds = userIds.join(',');
+  // Normalize to a safe array first so null callers don't throw on spread/length.
+  const safeUserIds = Array.isArray(userIds) ? userIds : [];
 
-  // Memoize the target user IDs array so its reference remains stable between renders
-  const stableUserIds = useMemo(() => userIds, [serializedUserIds]);
+  // Serialize to a collision-safe JSON string so that user IDs containing
+  // commas (or any delimiter) are encoded correctly. Sorting first ensures
+  // ['a','b'] and ['b','a'] produce the same key and don't trigger extra
+  // subscriptions due to order differences. Using safeUserIds.length and the
+  // individual IDs as primitive deps avoids the need for an eslint-disable.
+  const serializedUserIds = useMemo(
+    () => (safeUserIds.length === 0 ? '' : JSON.stringify([...safeUserIds].sort())),
+    // safeUserIds.length + individual IDs are primitive deps React can compare
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [safeUserIds.length, ...safeUserIds]
+  );
+
+  // Reconstruct a stable array reference from the parsed JSON so that inline
+  // arrays (e.g. usePresence(['user1','user2'])) do not cause subscription
+  // effects below to re-run on every parent render.
+  const stableUserIds = useMemo(
+    () => (serializedUserIds ? JSON.parse(serializedUserIds) : []),
+    [serializedUserIds]
+  );
 
   // 1. Synchronize local map when global onlineUsers change or target user IDs change
   useEffect(() => {
